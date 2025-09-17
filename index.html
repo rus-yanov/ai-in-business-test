@@ -1,0 +1,197 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Random Review Sentiment — Hugging Face</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b1020;
+      --card:#121733;
+      --muted:#a9b3d6;
+      --accent:#7c9cff;
+      --good:#25c77a;
+      --bad:#ff6b6b;
+      --neutral:#f1c40f;
+      --border:rgba(255,255,255,0.08);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color:#e6e9ff;
+      background: radial-gradient(1000px 600px at 10% -10%, #1b2248 0%, transparent 60%), radial-gradient(800px 500px at 110% 20%, #222a5a 0%, transparent 60%), var(--bg);
+      display:flex; align-items:center; justify-content:center; padding:32px;
+    }
+    .app{
+      width:min(900px, 95vw);
+      background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.005));
+      border:1px solid var(--border);
+      border-radius:20px;
+      box-shadow:0 20px 60px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+      overflow:hidden;
+    }
+    header{
+      padding:20px 24px;
+      display:flex; align-items:center; gap:12px;
+      border-bottom:1px solid var(--border);
+      background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+    }
+    header .logo{
+      width:40px; height:40px; display:grid; place-items:center;
+      border-radius:12px; background: #1e2652; color:var(--accent);
+      border:1px solid var(--border);
+      box-shadow:inset 0 0 30px rgba(124,156,255,0.15);
+    }
+    header h1{
+      margin:0; font-size:1.1rem; letter-spacing:.2px; font-weight:700;
+    }
+    header .sub{
+      color:var(--muted); font-size:.9rem; margin-top:2px;
+    }
+
+    .content{padding:22px; display:grid; gap:18px}
+    .row{
+      display:grid; gap:14px;
+    }
+    @media (min-width: 720px){
+      .row{grid-template-columns: 1fr auto}
+    }
+    .controls{
+      display:flex; gap:12px; flex-wrap:wrap; align-items:center;
+      background:rgba(255,255,255,0.03);
+      border:1px solid var(--border);
+      border-radius:14px; padding:12px;
+    }
+    .token{
+      flex:1 1 280px; display:flex; gap:10px; align-items:center;
+      background:rgba(255,255,255,0.04);
+      border:1px solid var(--border); border-radius:12px; padding:10px 12px;
+    }
+    .token i{color:var(--muted)}
+    .token input{
+      flex:1; border:none; outline:none; background:transparent; color:#e6e9ff;
+      font-size:.95rem;
+    }
+    .hint{
+      width:100%; color:var(--muted); font-size:.85rem; margin-top:-6px;
+    }
+    button#analyzeBtn{
+      appearance:none;
+      border:none; cursor:pointer;
+      background:linear-gradient(180deg, #7898ff, #5577ff);
+      color:white; font-weight:700; letter-spacing:.2px;
+      padding:12px 18px; border-radius:12px;
+      box-shadow:0 8px 24px rgba(85,119,255,.35);
+      transition:transform .08s ease, box-shadow .2s ease, opacity .2s;
+    }
+    button#analyzeBtn:disabled{
+      opacity:.6; cursor:not-allowed; box-shadow:none;
+    }
+    button#analyzeBtn:hover:not(:disabled){
+      transform:translateY(-1px); box-shadow:0 12px 26px rgba(85,119,255,.45);
+    }
+
+    .panel{
+      background:rgba(255,255,255,0.03);
+      border:1px solid var(--border);
+      border-radius:14px; padding:16px;
+    }
+    .label{
+      font-size:.9rem; color:var(--muted); margin-bottom:8px;
+      display:flex; align-items:center; gap:8px;
+    }
+    #reviewText{
+      font-size:1.05rem; line-height:1.6; color:#f3f6ff;
+      white-space:pre-wrap;
+    }
+    .sentiment{
+      display:flex; align-items:center; gap:12px; font-size:1.05rem;
+    }
+    .sentiment .icon{
+      font-size:2rem; width:2rem; display:grid; place-items:center;
+      filter: drop-shadow(0 6px 14px rgba(0,0,0,0.4));
+    }
+    .pos{color:var(--good)}
+    .neg{color:var(--bad)}
+    .neu{color:var(--neutral)}
+    .score{color:var(--muted); font-size:.95rem}
+    .status{
+      color:var(--muted); font-size:.9rem; display:flex; align-items:center; gap:8px;
+    }
+    .error{
+      color:#ffd5d5; background:rgba(255,0,0,0.08); border:1px solid rgba(255,0,0,0.2);
+      padding:10px 12px; border-radius:10px; font-size:.92rem;
+    }
+    footer{
+      padding:16px 22px; display:flex; justify-content:space-between; align-items:center; gap:10px;
+      border-top:1px solid var(--border); color:var(--muted); font-size:.85rem;
+    }
+    a{color:#aabaff; text-decoration:none}
+    a:hover{text-decoration:underline}
+    code.kbd{
+      background:rgba(255,255,255,0.07); border:1px solid var(--border);
+      border-radius:6px; padding:1px 6px; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size:.86rem; color:#dfe3ff;
+    }
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="Random Review Sentiment Analyzer">
+    <header>
+      <div class="logo" aria-hidden="true"><i class="fa-solid fa-robot"></i></div>
+      <div>
+        <h1>Random Review Sentiment</h1>
+        <div class="sub">Uses <strong>siebert/sentiment-roberta-large-english</strong> via Hugging Face Inference API</div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="row">
+        <div class="controls" role="group" aria-label="Controls">
+          <div class="token" title="Optional: add your HF API token for higher rate limits">
+            <i class="fa-solid fa-key"></i>
+            <input id="hfToken" type="password" placeholder="Hugging Face API token (optional)"/>
+          </div>
+          <button id="analyzeBtn">
+            <i class="fa-solid fa-shuffle"></i>
+            Analyze Random Review
+          </button>
+          <div id="status" class="status" aria-live="polite">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>Loading reviews…</span>
+          </div>
+          <div id="error" class="error" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="panel" aria-labelledby="reviewLabel">
+        <div class="label" id="reviewLabel"><i class="fa-solid fa-quote-left"></i> Random review</div>
+        <div id="reviewText">—</div>
+      </div>
+
+      <div class="panel" aria-labelledby="sentimentLabel">
+        <div class="label" id="sentimentLabel"><i class="fa-solid fa-face-smile"></i> Sentiment</div>
+        <div class="sentiment">
+          <div id="sentimentIcon" class="icon neu"><i class="fa-regular fa-circle-question"></i></div>
+          <div id="sentimentText">—</div>
+          <div id="scoreText" class="score"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <div><span>Data file:</span> <code class="kbd">reviews_test.tsv</code> (expects a <code class="kbd">text</code> column)</div>
+      <div>Made for GitHub Pages · Vanilla HTML + JS</div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
