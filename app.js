@@ -1,7 +1,8 @@
 // app.js
 const STATE = {
   reviews: [],
-  loading: false
+  loading: false,
+  history: []
 };
 
 const EL = {
@@ -12,18 +13,35 @@ const EL = {
   reviewText: document.getElementById('reviewText'),
   sentimentIcon: document.getElementById('sentimentIcon'),
   sentimentText: document.getElementById('sentimentText'),
-  scoreText: document.getElementById('scoreText')
+  scoreText: document.getElementById('scoreText'),
+  scoreFill: document.getElementById('scoreFill'),
+  historyList: document.getElementById('historyList')
 };
 
+// ========== STATUS & ERROR ==========
+let dotsInterval;
 function setStatus(msg) {
   if (!EL.status) return;
   EL.status.style.display = 'flex';
-  EL.status.querySelector('span')?.remove();
-  const span = document.createElement('span');
-  span.textContent = msg;
-  EL.status.appendChild(span);
+  const span = EL.status.querySelector('span');
+  if (span) span.textContent = msg;
+  else {
+    const s = document.createElement('span');
+    s.textContent = msg;
+    EL.status.appendChild(s);
+  }
+}
+function setLoadingStatus(msg) {
+  clearInterval(dotsInterval);
+  let dots = 0;
+  setStatus(msg);
+  dotsInterval = setInterval(() => {
+    dots = (dots + 1) % 4;
+    setStatus(msg + '.'.repeat(dots));
+  }, 500);
 }
 function clearStatus() {
+  clearInterval(dotsInterval);
   EL.status.style.display = 'none';
 }
 function showError(msg) {
@@ -35,9 +53,10 @@ function clearError() {
   EL.error.style.display = 'none';
 }
 
+// ========== DATA LOADING ==========
 async function loadTSV() {
   try {
-    setStatus('Loading reviews…');
+    setLoadingStatus('Loading reviews');
     const res = await fetch('reviews_test.tsv', { cache: 'no-store' });
     if (!res.ok) throw new Error(`Failed to fetch reviews_test.tsv (${res.status})`);
     const text = await res.text();
@@ -48,10 +67,6 @@ async function loadTSV() {
       skipEmptyLines: true
     });
 
-    if (parsed.errors?.length) {
-      console.warn('PapaParse errors:', parsed.errors);
-    }
-
     const rows = Array.isArray(parsed.data) ? parsed.data : [];
     STATE.reviews = rows
       .map(r => (r && typeof r.text === 'string' ? r.text.trim() : ''))
@@ -61,44 +76,53 @@ async function loadTSV() {
       throw new Error('No reviews found. Ensure the TSV has a "text" column.');
     }
 
-    setStatus(`Loaded ${STATE.reviews.length.toLocaleString()} reviews.`);
+    setStatus(`Loaded ${STATE.reviews.length.toLocaleString()} reviews`);
     EL.btn.disabled = false;
   } catch (err) {
     showError(err.message || String(err));
-    setStatus('Unable to load reviews.');
+    setStatus('Unable to load reviews');
     EL.btn.disabled = true;
   }
 }
 
+// ========== REVIEW PICKING ==========
 function pickRandomReview() {
   const arr = STATE.reviews;
   const idx = Math.floor(Math.random() * arr.length);
   return arr[idx];
 }
 
+// ========== SENTIMENT UI ==========
 function updateSentimentUI(kind, score) {
   EL.sentimentIcon.className = 'icon';
   EL.scoreText.textContent = '';
+  EL.scoreFill.style.width = '0';
+  EL.scoreFill.className = 'score-fill';
 
   if (kind === 'positive') {
     EL.sentimentIcon.classList.add('pos');
     EL.sentimentIcon.innerHTML = '<i class="fa-solid fa-thumbs-up"></i>';
     EL.sentimentText.textContent = 'Positive';
+    EL.scoreFill.classList.add('pos-fill');
   } else if (kind === 'negative') {
     EL.sentimentIcon.classList.add('neg');
     EL.sentimentIcon.innerHTML = '<i class="fa-solid fa-thumbs-down"></i>';
     EL.sentimentText.textContent = 'Negative';
+    EL.scoreFill.classList.add('neg-fill');
   } else {
     EL.sentimentIcon.classList.add('neu');
     EL.sentimentIcon.innerHTML = '<i class="fa-regular fa-circle-question"></i>';
     EL.sentimentText.textContent = 'Neutral / Uncertain';
+    EL.scoreFill.classList.add('neu-fill');
   }
 
   if (typeof score === 'number' && !Number.isNaN(score)) {
     EL.scoreText.textContent = `(score: ${score.toFixed(3)})`;
+    EL.scoreFill.style.width = `${(score * 100).toFixed(1)}%`;
   }
 }
 
+// ========== API CALL ==========
 async function callHuggingFace(reviewText, token) {
   const url = 'https://api-inference.huggingface.co/models/siebert/sentiment-roberta-large-english';
   const headers = { 'Content-Type': 'application/json' };
@@ -115,15 +139,14 @@ async function callHuggingFace(reviewText, token) {
 
   if (!res.ok) {
     const detail = isJson && payload && payload.error ? `: ${payload.error}` : '';
-    const msg = `API error ${res.status}${detail}`;
-    throw new Error(msg);
+    throw new Error(`API error ${res.status}${detail}`);
   }
 
   return payload;
 }
 
+// ========== RESPONSE INTERPRETATION ==========
 function interpretResponse(payload) {
-  // Expected: [[{ label: 'POSITIVE' | 'NEGATIVE', score: number }]]
   let label = null;
   let score = null;
 
@@ -132,7 +155,6 @@ function interpretResponse(payload) {
     label = item.label;
     score = typeof item.score === 'number' ? item.score : null;
   } else if (Array.isArray(payload) && payload[0] && payload[0].label) {
-    // Some deployments return single list
     const item = payload[0];
     label = item.label;
     score = typeof item.score === 'number' ? item.score : null;
@@ -145,41 +167,82 @@ function interpretResponse(payload) {
   return { kind, score: typeof score === 'number' ? score : null };
 }
 
-async function onAnalyzeClick() {
-  clearError();
-  if (!STATE.reviews.length) {
-    showError('Reviews are not loaded yet.');
-    return;
-  }
-
-  const token = EL.token.value || '';
-  const text = pickRandomReview();
-
-  EL.reviewText.textContent = text;
-  updateSentimentUI('neutral', null);
-  EL.btn.disabled = true;
-  setStatus('Calling Hugging Face Inference API…');
-
-  try {
-    const payload = await callHuggingFace(text, token);
-    // Handle potential model loading message { "error": "Model ... is currently loading", "estimated_time": ... }
-    if (payload && payload.error && /loading/i.test(payload.error)) {
-      throw new Error('Model is warming up on Hugging Face. Please try again in a few seconds.');
+// ========== HISTORY ==========
+function addToHistory(text, kind, score) {
+  STATE.history.unshift({ text, kind, score });
+  if (STATE.history.length > 5) STATE.history.pop();
+  renderHistory();
+}
+function renderHistory() {
+  EL.historyList.innerHTML = '';
+  for (const item of STATE.history) {
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    const icon = document.createElement('i');
+    if (item.kind === 'positive') {
+      icon.className = 'fa-solid fa-thumbs-up pos';
+    } else if (item.kind === 'negative') {
+      icon.className = 'fa-solid fa-thumbs-down neg';
+    } else {
+      icon.className = 'fa-regular fa-circle-question neu';
     }
-
-    const { kind, score } = interpretResponse(payload);
-    updateSentimentUI(kind, score);
-    clearStatus();
-  } catch (err) {
-    showError(err.message || 'Unknown error during inference.');
-    setStatus('Inference failed.');
-  } finally {
-    EL.btn.disabled = false;
+    const span = document.createElement('div');
+    span.className = 'text';
+    span.textContent = item.text;
+    const score = document.createElement('div');
+    score.className = 'score';
+    score.textContent = item.score != null ? item.score.toFixed(3) : '';
+    div.appendChild(icon);
+    div.appendChild(span);
+    div.appendChild(score);
+    EL.historyList.appendChild(div);
   }
 }
 
+// ========== MAIN ==========
+async function analyzeOne() {
+  if (STATE.loading) return;
+  STATE.loading = true;
+  clearError();
+
+  try {
+    const review = pickRandomReview();
+    if (!review) throw new Error('No reviews loaded.');
+
+    // Animate text fade-out → update → fade-in
+    EL.reviewText.classList.add('faded');
+    setTimeout(() => {
+      EL.reviewText.textContent = review;
+      EL.reviewText.classList.remove('faded');
+    }, 250);
+
+    setLoadingStatus('Calling Hugging Face API');
+
+    const payload = await callHuggingFace(review, EL.token.value);
+    const { kind, score } = interpretResponse(payload);
+
+    updateSentimentUI(kind, score);
+    addToHistory(review, kind, score);
+
+    setStatus('Done');
+  } catch (err) {
+    showError(err.message || String(err));
+    setStatus('Error');
+  } finally {
+    STATE.loading = false;
+  }
+}
+
+// ========== INIT ==========
 document.addEventListener('DOMContentLoaded', () => {
+  // Restore token from localStorage
+  const saved = localStorage.getItem('hfToken');
+  if (saved) EL.token.value = saved;
+  EL.token.addEventListener('change', () => {
+    localStorage.setItem('hfToken', EL.token.value);
+  });
+
   EL.btn.disabled = true;
+  EL.btn.addEventListener('click', analyzeOne);
   loadTSV();
-  EL.btn.addEventListener('click', onAnalyzeClick);
 });
