@@ -1,10 +1,29 @@
 // app.js
+
+// ========== STATE ==========
 const STATE = {
   reviews: [],
   loading: false,
   history: []
 };
 
+// ========== FALLBACK REVIEWS ==========
+// Since there is no reviews_test.tsv file, we use a built-in list of reviews.
+// This ensures the app works without external files.
+const FALLBACK_REVIEWS = [
+  "Great product, exactly as described and fast shipping.",
+  "Terrible customer service — arrived damaged and no reply.",
+  "Quality is excellent, I will buy again.",
+  "Not worth the money, very disappointed.",
+  "Fast delivery and great packaging.",
+  "The size was wrong, but return was easy.",
+  "Five stars — works perfectly.",
+  "Arrived late and item was scratched.",
+  "Amazing value for the price, highly recommended.",
+  "Mediocre — expected better performance."
+];
+
+// ========== ELEMENT REFERENCES ==========
 const EL = {
   status: document.getElementById('status'),
   error: document.getElementById('error'),
@@ -53,30 +72,17 @@ function clearError() {
   EL.error.style.display = 'none';
 }
 
-// ========== DATA LOADING ==========
+// ========== DATA LOADING (NO TSV) ==========
+// Instead of fetching reviews_test.tsv (which doesn't exist),
+// we immediately load the built-in fallback reviews.
 async function loadTSV() {
   try {
-    setLoadingStatus('Loading reviews');
-    const res = await fetch('reviews_test.tsv', { cache: 'no-store' });
-    if (!res.ok) throw new Error(`Failed to fetch reviews_test.tsv (${res.status})`);
-    const text = await res.text();
-
-    const parsed = Papa.parse(text, {
-      header: true,
-      delimiter: '\t',
-      skipEmptyLines: true
-    });
-
-    const rows = Array.isArray(parsed.data) ? parsed.data : [];
-    STATE.reviews = rows
-      .map(r => (r && typeof r.text === 'string' ? r.text.trim() : ''))
-      .filter(Boolean);
-
+    setLoadingStatus('Loading sample reviews');
+    STATE.reviews = FALLBACK_REVIEWS.slice(); // copy the array
     if (STATE.reviews.length === 0) {
-      throw new Error('No reviews found. Ensure the TSV has a "text" column.');
+      throw new Error('No fallback reviews available.');
     }
-
-    setStatus(`Loaded ${STATE.reviews.length.toLocaleString()} reviews`);
+    setStatus(`Loaded ${STATE.reviews.length} sample reviews`);
     EL.btn.disabled = false;
   } catch (err) {
     showError(err.message || String(err));
@@ -244,5 +250,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   EL.btn.disabled = true;
   EL.btn.addEventListener('click', analyzeOne);
-  loadTSV();
+  loadTSV(); // this now loads fallback reviews
 });
